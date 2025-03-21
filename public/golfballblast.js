@@ -85,7 +85,9 @@ window.onload = function() {
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseup", handleMouseUp);
-    document.getElementById("startButton").addEventListener("click", startGame);
+    document.getElementById("localPlayButton").addEventListener("click", startGame);
+    document.getElementById("onlineButton").addEventListener("click", handleOnlineMultiplayer);
+    document.getElementById("nftButton").addEventListener("click", handleNFTPlatform);
     document.getElementById("playAgainButton").addEventListener("click", resetGame);
     
     // Initialize powerup buttons
@@ -97,6 +99,21 @@ window.onload = function() {
     // Start the game loop
     requestAnimationFrame(gameLoop);
 };
+
+/**
+ * Handle click on Online Multiplayer button
+ */
+function handleOnlineMultiplayer() {
+    // This is a placeholder for future implementation
+    alert("Online Multiplayer is coming soon!");
+}
+
+/**
+ * Handle click on NFT Platform button
+ */
+function handleNFTPlatform() {
+    window.location.href = "GolfBallNFT.html";
+}
 
 /**
  * Set up powerup buttons with info and event listeners

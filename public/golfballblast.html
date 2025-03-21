@@ -50,6 +50,34 @@
             color: #DDD;
         }
         
+        .button-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            width: 250px;
+        }
+        
+        .button.disabled {
+            background-color: #666;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        
+        .button.disabled:hover {
+            background-color: #666;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .button.nft {
+            background-color: #FFD700;
+            color: #333;
+        }
+        
+        .button.nft:hover {
+            background-color: #FFC000;
+        }
+        
         /* Setup screen */
         #setupScreen {
             display: none;
@@ -308,7 +336,11 @@
         <div id="titleScreen">
             <div class="logo">GOLF ARENA</div>
             <div class="subtitle">A 1v1 arena-style golf battle!</div>
-            <button id="startButton" class="button">Start Game</button>
+            <div class="button-container">
+                <button id="localPlayButton" class="button">Local Play</button>
+                <button id="onlineButton" class="button disabled">Online Multiplayer (Coming Soon)</button>
+                <button id="nftButton" class="button">NFT Platform</button>
+            </div>
         </div>
         
         <!-- Setup Screen -->
