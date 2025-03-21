@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golf Arena - Powerup Selection</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; background-color: #132614; color: white; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { display: flex; flex-direction: column; align-items: center; max-width: 900px; margin: 0 auto; padding: 2rem; }
+        .logo { font-size: 3rem; font-weight: bold; color: #8CC067; margin-bottom: 1rem; text-shadow: 3px 3px 0 rgba(0,0,0,0.3); }
+        .subtitle { font-size: 1.2rem; margin-bottom: 2rem; color: #DDD; }
+        .setup-title { font-size: 1.5rem; margin-bottom: 1.5rem; color: #8CC067; }
+        .powerup-grid { display: grid; grid-template-columns: repeat(1, 1fr); gap: 1rem; width: 300px; }
+        .powerup-button { background-color: #444; border: 2px solid #666; border-radius: 8px; color: white; padding: 1rem; cursor: pointer; transition: all 0.2s ease; width: 100%; text-align: center; }
+        .powerup-button:hover { background-color: #555; transform: translateY(-2px); }
+        .powerup-button.selected { border-color: #FFD700; background-color: #666; }
+        .powerup-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .powerup-name { font-size: 1rem; margin-bottom: 0.5rem; }
+        .powerup-description { font-size: 0.8rem; color: #AAA; }
+        .button { background-color: #8CC067; color: white; font-size: 1.2rem; font-weight: bold; padding: 0.8rem 1.5rem; border: none; border-radius: 5px; cursor: pointer; transition: all 0.2s ease; margin-top: 1rem; }
+        .button:hover { background-color: #709751; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        .button:disabled { background-color: #666; cursor: not-allowed; }
+        #status { font-size: 1rem; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">GOLF ARENA</div>
+        <div class="subtitle">Select Your Powerup</div>
+        <div class="setup-title">Choose Your Powerup</div>
+        <div class="powerup-grid" id="powerupGrid"></div>
+        <button id="readyButton" class="button" disabled>Ready</button>
+        <div id="status">Waiting for opponent...</div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCZR0yqDxpcSBSNeeXzM4TJBAC5yPKBX2c",
+            authDomain: "golf-ball-blast.firebaseapp.com",
+            projectId: "golf-ball-blast",
+            storageBucket: "golf-ball-blast.firebasestorage.app",
+            messagingSenderId: "30314302279",
+            appId: "1:30314302279:web:1269fa089866e05a165a62",
+            measurementId: "G-1X377HF780"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameId = urlParams.get('gameId');
+        const uid = urlParams.get('uid');
+        const isHost = urlParams.get('isHost') === 'true';
+        const gameRef = db.ref(`games/${gameId}`);
+
+        const powerups = [
+            { name: "Super Swing", description: "Double swing power. Can break certain walls.", icon: "🔨" },
+            { name: "Wall Placement", description: "Place a temporary wall that lasts 2 turns.", icon: "🧱" },
+            { name: "Bounce Wall", description: "Convert a wall to a super bouncy surface for 2 turns.", icon: "🔄" }
+        ];
+
+        let selectedPowerup = null;
+
+        const powerupGrid = document.getElementById('powerupGrid');
+        const readyButton = document.getElementById('readyButton');
+        const status = document.getElementById('status');
+
+        powerups.forEach((powerup, index) => {
+            const button = document.createElement('div');
+            button.className = 'powerup-button';
+            button.innerHTML = `
+                <div class="powerup-icon">${powerup.icon}</div>
+                <div class="powerup-name">${powerup.name}</div>
+                <div class="powerup-description">${powerup.description}</div>
+            `;
+            button.addEventListener('click', () => {
+                powerupGrid.querySelectorAll('.powerup-button').forEach(btn => btn.classList.remove('selected'));
+                button.classList.add('selected');
+                selectedPowerup = index;
+                readyButton.disabled = false;
+            });
+            powerupGrid.appendChild(button);
+        });
+
+        readyButton.addEventListener('click', () => {
+            const playerIndex = isHost ? 0 : 1;
+            gameRef.child(`selectedPowerups/${playerIndex}`).set(selectedPowerup);
+            gameRef.child(`ready/${playerIndex}`).set(true);
+            readyButton.disabled = true;
+            status.textContent = "Waiting for opponent to ready up...";
+        });
+
+        gameRef.child('ready').on('value', (snapshot) => {
+            const readyStates = snapshot.val();
+            if (readyStates && readyStates[0] && readyStates[1]) {
+                gameRef.update({ currentScreen: "game" });
+                window.location.href = `golfballblastmultiplayer.html?gameId=${gameId}&uid=${uid}&isHost=${isHost}`;
+            }
+        });
+    </script>
+</body>
+</html>
