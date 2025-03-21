@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golf Arena - Multiplayer Game</title>
+    <style>
+        /* Copy all styles from golfballblast.html except title screen styles */
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #132614;
+            color: white;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        /* Game screen */
+        #gameScreen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .game-header {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+        
+        .score-display {
+            font-size: 1.2rem;
+            font-weight: bold;
+            background-color: rgba(0,0,0,0.3);
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+        }
+        
+        .message-display {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+            height: 1.5rem;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .player-indicator {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: inline-block;
+            border: 2px solid white;
+        }
+        
+        #gameCanvas {
+            background-color: #8CC067;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            cursor: crosshair;
+        }
+        
+        .game-controls {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-top: 1rem;
+        }
+        
+        .power-container {
+            width: 200px;
+            height: 20px;
+            background-color: #333;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        #powerBar {
+            height: 100%;
+            width: 0;
+            background-color: #00FF00;
+            transition: width 0.1s ease;
+        }
+        
+        .angle-display {
+            font-size: 1rem;
+        }
+        
+        /* Powerup styles */
+        #powerupContainer {
+            display: flex;
+            gap: 10px;
+            margin-top: 1rem;
+        }
+        
+        .powerup-button {
+            background-color: #555555;
+            color: white;
+            border: none;
+            padding: 10px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100px;
+            text-align: center;
+        }
+        
+        .powerup-button:hover:not(.disabled) {
+            background-color: #666666;
+        }
+        
+        .powerup-button.active {
+            background-color: #888888;
+        }
+        
+        .powerup-button.disabled {
+            background-color: #333333;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        
+        .powerup-icon {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .powerup-name {
+            font-size: 12px;
+            margin-bottom: 3px;
+        }
+        
+        .powerup-cooldown {
+            font-size: 10px;
+            color: #cccccc;
+        }
+        
+        /* Game end screen */
+        #gameEndScreen {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .winner-message {
+            font-size: 2rem;
+            margin-bottom: 2rem;
+            color: #FFD700;
+            text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+        }
+        
+        /* Buttons */
+        .button {
+            background-color: #8CC067;
+            color: white;
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin: 0.5rem;
+        }
+        
+        .button:hover {
+            background-color: #709751;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .button:active {
+            transform: translateY(0);
+            box-shadow: none;
+        }
+
+        /* Player info */
+        .player-info {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            background-color: rgba(0,0,0,0.2);
+            border-radius: 5px;
+        }
+
+        .player-name {
+            font-weight: bold;
+            color: #8CC067;
+        }
+
+        .waiting-message {
+            text-align: center;
+            color: #FFD700;
+            margin: 1rem 0;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Game Screen -->
+        <div id="gameScreen">
+            <div class="player-info">
+                <span class="player-name" id="player1Name">Player 1</span>
+                <span class="player-name" id="player2Name">Player 2</span>
+            </div>
+            
+            <div class="game-header">
+                <div id="scoreDisplay" class="score-display">0 - 0</div>
+            </div>
+            
+            <div id="messageDisplay" class="message-display">Waiting for opponent...</div>
+            
+            <canvas id="gameCanvas" width="800" height="600"></canvas>
+            
+            <div class="game-controls">
+                <div class="power-container">
+                    <div id="powerBar"></div>
+                </div>
+                
+                <div id="angleIndicator" class="angle-display">Angle: 0°</div>
+            </div>
+            
+            <div id="powerupContainer">
+                <!-- Will be populated by JS -->
+            </div>
+        </div>
+        
+        <!-- Game End Screen -->
+        <div id="gameEndScreen">
+            <div id="winnerMessage" class="winner-message"></div>
+            <button id="playAgainButton" class="button">Back to Lobby</button>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="golfballblastmultiplayer.js"></script>
+</body>
+</html> 

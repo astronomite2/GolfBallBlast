@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golf Arena - Multiplayer Lobby</title>
+    <style>
+        /* General styles */
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #132614;
+            color: white;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .logo {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #8CC067;
+            margin-bottom: 1rem;
+            text-shadow: 3px 3px 0 rgba(0,0,0,0.3);
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            color: #DDD;
+        }
+        
+        /* Lobby styles */
+        .lobby-section {
+            background-color: rgba(0, 0, 0, 0.2);
+            padding: 2rem;
+            border-radius: 10px;
+            width: 100%;
+            max-width: 500px;
+            margin-bottom: 2rem;
+        }
+        
+        .name-input {
+            width: 100%;
+            padding: 0.8rem;
+            margin-bottom: 1rem;
+            border: none;
+            border-radius: 5px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 1.1rem;
+        }
+        
+        .name-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Queue section */
+        .queue-section {
+            background-color: rgba(0, 0, 0, 0.2);
+            padding: 2rem;
+            border-radius: 10px;
+            width: 100%;
+            max-width: 500px;
+            display: none;
+        }
+        
+        .queue-status {
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid #8CC067;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Button styles */
+        .button {
+            background-color: #8CC067;
+            color: white;
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+        
+        .button:hover {
+            background-color: #709751;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        /* Status message */
+        #status-message {
+            color: #8CC067;
+            text-align: center;
+            margin-top: 1rem;
+            min-height: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">GOLF ARENA</div>
+        <div class="subtitle">Multiplayer Lobby</div>
+        
+        <!-- Lobby Section -->
+        <div id="lobby-section" class="lobby-section">
+            <input type="text" id="display-name" class="name-input" placeholder="Enter your display name" maxlength="20">
+            <button id="join-queue" class="button">Join Queue</button>
+            <div id="status-message"></div>
+        </div>
+        
+        <!-- Queue Section -->
+        <div id="queue-section" class="queue-section">
+            <div class="queue-status">Searching for opponent...</div>
+            <div class="spinner"></div>
+            <button id="leave-queue" class="button">Leave Queue</button>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="golfballblastmultiplayer.js"></script>
+</body>
+</html> 

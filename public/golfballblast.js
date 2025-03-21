@@ -104,8 +104,7 @@ window.onload = function() {
  * Handle click on Online Multiplayer button
  */
 function handleOnlineMultiplayer() {
-    // This is a placeholder for future implementation
-    alert("Online Multiplayer is coming soon!");
+    window.location.href = 'multiplayer-lobby.html';
 }
 
 /**
