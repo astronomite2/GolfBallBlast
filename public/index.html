@@ -405,36 +405,40 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
 
     <script>
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyCZR0yqDxpcSBSNeeXzM4TJBAC5yPKBX2c",
-            authDomain: "golf-ball-blast.firebaseapp.com",
-            projectId: "golf-ball-blast",
-            storageBucket: "golf-ball-blast.firebasestorage.app",
-            messagingSenderId: "30314302279",
-            appId: "1:30314302279:web:1269fa089866e05a165a62",
-            measurementId: "G-1X377HF780"
-        };
-
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-
-        // Handle Online Multiplayer with Authentication
-        window.handleOnlineMultiplayer = function() {
-            const auth = firebase.auth();
-            const provider = new firebase.auth.GoogleAuthProvider();
-            
-            auth.signInWithPopup(provider)
-                .then((result) => {
-                    const user = result.user;
-                    // Redirect to multiplayer lobby with user info
-                    window.location.href = `multiplayer-lobby.html?uid=${user.uid}&displayName=${encodeURIComponent(user.displayName)}`;
-                })
-                .catch((error) => {
-                    console.error("Authentication failed:", error);
-                    alert("Failed to sign in. Please try again.");
-                });
-        };
+        document.addEventListener('DOMContentLoaded', () => {
+            // Firebase Configuration
+            const firebaseConfig = {
+                apiKey: "AIzaSyCZR0yqDxpcSBSNeeXzM4TJBAC5yPKBX2c",
+                authDomain: "golf-ball-blast.firebaseapp.com",
+                projectId: "golf-ball-blast",
+                storageBucket: "golf-ball-blast.firebasestorage.app",
+                messagingSenderId: "30314302279",
+                appId: "1:30314302279:web:1269fa089866e05a165a62",
+                measurementId: "G-1X377HF780"
+            };
+    
+            // Initialize Firebase
+            firebase.initializeApp(firebaseConfig);
+    
+            // Handle Online Multiplayer with Authentication
+            window.handleOnlineMultiplayer = function() {
+                const auth = firebase.auth();
+                const provider = new firebase.auth.GoogleAuthProvider();
+    
+                auth.signInWithPopup(provider)
+                    .then((result) => {
+                        const user = result.user;
+                        window.location.href = `multiplayer-lobby.html?uid=${user.uid}&displayName=${encodeURIComponent(user.displayName)}`;
+                    })
+                    .catch((error) => {
+                        console.error("Authentication failed:", error);
+                        alert("Failed to sign in. Please try again. Error: " + error.message);
+                    });
+            };
+    
+            // Attach event listener after definition
+            document.getElementById('onlineButton').addEventListener('click', window.handleOnlineMultiplayer);
+        });
     </script>
 </body>
 </html>
