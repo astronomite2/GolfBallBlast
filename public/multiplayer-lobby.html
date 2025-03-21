@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Golf Arena - Multiplayer Lobby</title>
     <style>
-        /* General styles */
         body {
             font-family: 'Arial', sans-serif;
             background-color: #132614;
@@ -41,7 +40,6 @@
             color: #DDD;
         }
         
-        /* Lobby styles */
         .lobby-section {
             background-color: rgba(0, 0, 0, 0.2);
             padding: 2rem;
@@ -66,7 +64,6 @@
             color: rgba(255, 255, 255, 0.5);
         }
         
-        /* Queue section */
         .queue-section {
             background-color: rgba(0, 0, 0, 0.2);
             padding: 2rem;
@@ -78,6 +75,13 @@
         
         .queue-status {
             text-align: center;
+            margin-bottom: 1rem;
+        }
+        
+        .player-count {
+            text-align: center;
+            font-size: 1.1rem;
+            color: #8CC067;
             margin-bottom: 1rem;
         }
         
@@ -96,7 +100,6 @@
             100% { transform: rotate(360deg); }
         }
         
-        /* Button styles */
         .button {
             background-color: #8CC067;
             color: white;
@@ -123,7 +126,6 @@
             box-shadow: none;
         }
         
-        /* Status message */
         #status-message {
             color: #8CC067;
             text-align: center;
@@ -137,22 +139,20 @@
         <div class="logo">GOLF ARENA</div>
         <div class="subtitle">Multiplayer Lobby</div>
         
-        <!-- Lobby Section -->
         <div id="lobby-section" class="lobby-section">
             <input type="text" id="display-name" class="name-input" placeholder="Enter your display name" maxlength="20">
             <button id="join-queue" class="button">Join Queue</button>
             <div id="status-message"></div>
         </div>
         
-        <!-- Queue Section -->
         <div id="queue-section" class="queue-section">
-            <div class="queue-status">Searching for opponent...</div>
+            <div class="queue-status">Waiting for opponent...</div>
+            <div class="player-count" id="player-count">Players in queue: 0</div>
             <div class="spinner"></div>
             <button id="leave-queue" class="button">Leave Queue</button>
         </div>
     </div>
     
-    <!-- Scripts -->
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
@@ -166,122 +166,181 @@
             appId: "1:30314302279:web:1269fa089866e05a165a62",
             measurementId: "G-1X377HF780"
         };
-
+    
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-
+    
         const displayNameInput = document.getElementById('display-name');
         const joinQueueButton = document.getElementById('join-queue');
         const leaveQueueButton = document.getElementById('leave-queue');
         const lobbySection = document.getElementById('lobby-section');
         const queueSection = document.getElementById('queue-section');
         const statusMessage = document.getElementById('status-message');
-
+        const playerCountDisplay = document.getElementById('player-count');
+    
         let playerData = {
             uid: null,
             displayName: '',
             gameId: null,
-            isHost: false
+            isHost: false,
+            inQueue: false
         };
-
+    
         const urlParams = new URLSearchParams(window.location.search);
         playerData.uid = urlParams.get('uid');
         const defaultDisplayName = decodeURIComponent(urlParams.get('displayName') || '');
         displayNameInput.value = defaultDisplayName;
-
+    
         joinQueueButton.addEventListener('click', joinQueue);
         leaveQueueButton.addEventListener('click', leaveQueue);
         displayNameInput.addEventListener('input', validateName);
-
+    
+        const queueRef = db.ref('queue');
+        const gamesRef = db.ref('games');
+    
+        // Monitor queue updates
+        queueRef.on('value', (snapshot) => {
+            const queueData = snapshot.val();
+            const playerCount = queueData ? Object.keys(queueData).length : 0;
+            playerCountDisplay.textContent = `Players in queue: ${playerCount}`;
+    
+            // Only the oldest player initiates matchmaking
+            if (playerCount >= 2 && isOldestPlayer(queueData) && playerData.inQueue) {
+                matchPlayers();
+            }
+        });
+    
+        // Monitor game assignments for this specific player
+        gamesRef.on('child_added', (snapshot) => {
+            handleGameUpdate(snapshot);
+        });
+    
+        gamesRef.on('child_changed', (snapshot) => {
+            handleGameUpdate(snapshot);
+        });
+    
+        function handleGameUpdate(snapshot) {
+            const gameId = snapshot.key;
+            const gameData = snapshot.val();
+    
+            if (gameData && gameData.host && gameData.guest && playerData.inQueue) {
+                if (playerData.uid === gameData.host.id) {
+                    playerData.gameId = gameId;
+                    playerData.isHost = true;
+                    playerData.inQueue = false;
+                    redirectToPowerupSelection();
+                } else if (playerData.uid === gameData.guest.id) {
+                    playerData.gameId = gameId;
+                    playerData.isHost = false;
+                    playerData.inQueue = false;
+                    redirectToPowerupSelection();
+                }
+            }
+        }
+    
         function validateName() {
             const name = displayNameInput.value.trim();
             joinQueueButton.disabled = name.length < 3;
         }
-
+    
         async function joinQueue() {
             const displayName = displayNameInput.value.trim();
             if (displayName.length < 3) return;
-
+    
             playerData.displayName = displayName;
+            playerData.inQueue = true;
             lobbySection.style.display = 'none';
             queueSection.style.display = 'block';
-
-            const queueRef = db.ref('queue');
-            const snapshot = await queueRef.once('value');
-            const waitingPlayers = snapshot.val();
-
-            if (!waitingPlayers || Object.keys(waitingPlayers).length === 0) {
-                createGame();
-            } else if (Object.keys(waitingPlayers).length >= 1) {
-                joinExistingGame(waitingPlayers);
-            }
-        }
-
-        function leaveQueue() {
-            if (playerData.gameId) {
-                db.ref(`games/${playerData.gameId}`).remove();
-            }
-            db.ref(`queue/${playerData.uid}`).remove();
-            queueSection.style.display = 'none';
-            lobbySection.style.display = 'block';
-        }
-
-        function createGame() {
-            const gameId = generateGameId();
-            playerData.gameId = gameId;
-            playerData.isHost = true;
-
-            db.ref(`queue/${playerData.uid}`).set({
+            statusMessage.textContent = "Joining queue...";
+    
+            await db.ref(`queue/${playerData.uid}`).set({
+                uid: playerData.uid,
                 displayName: playerData.displayName,
-                gameId: gameId,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
             });
-
+    
+            statusMessage.textContent = "Waiting for opponent...";
+        }
+    
+        function isOldestPlayer(queueData) {
+            if (!queueData) return false;
+            const players = Object.entries(queueData).sort((a, b) => a[1].timestamp - b[1].timestamp);
+            return players[0][1].uid === playerData.uid;
+        }
+    
+        async function matchPlayers() {
+            const snapshot = await queueRef.once('value');
+            const waitingPlayers = snapshot.val();
+    
+            if (!waitingPlayers || Object.keys(waitingPlayers).length < 2 || !playerData.inQueue) return;
+    
+            const players = Object.entries(waitingPlayers)
+                .sort((a, b) => a[1].timestamp - b[1].timestamp)
+                .slice(0, 2);
+    
+            const [hostId, hostData] = players[0];
+            const [guestId, guestData] = players[1];
+    
+            // Prevent matching if this player isn't one of the selected players
+            if (playerData.uid !== hostId && playerData.uid !== guestId) return;
+    
+            const gameId = generateGameId();
             const gameData = initializeGameState();
-            const gameRef = db.ref(`games/${gameId}`);
-            gameRef.set(gameData);
-
-            listenForOpponent(gameId);
-        }
-
-        async function joinExistingGame(waitingPlayers) {
-            const games = Object.entries(waitingPlayers);
-            const oldestGame = games.sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
-            const [hostId, hostData] = oldestGame;
-
-            playerData.gameId = hostData.gameId;
-            playerData.isHost = false;
-
-            const gameRef = db.ref(`games/${hostData.gameId}`);
-            await gameRef.child('guest').set({
-                id: playerData.uid,
-                displayName: playerData.displayName
-            });
-
-            db.ref(`queue/${hostId}`).remove();
-            db.ref(`queue/${playerData.uid}`).remove();
-
-            // Redirect both players to powerup selection
-            window.location.href = `powerup-selection.html?gameId=${playerData.gameId}&uid=${playerData.uid}&isHost=${playerData.isHost}`;
-        }
-
-        function listenForOpponent(gameId) {
-            const gameRef = db.ref(`games/${gameId}`);
-            gameRef.child('guest').on('value', (snapshot) => {
-                if (snapshot.exists()) {
-                    db.ref(`queue/${playerData.uid}`).remove();
-                    window.location.href = `powerup-selection.html?gameId=${gameId}&uid=${playerData.uid}&isHost=${playerData.isHost}`;
+            gameData.host = { id: hostId, displayName: hostData.displayName };
+            gameData.guest = { id: guestId, displayName: guestData.displayName };
+    
+            // Atomically create game and remove players from queue
+            const updates = {};
+            updates[`games/${gameId}`] = gameData;
+            updates[`queue/${hostId}`] = null;
+            updates[`queue/${guestId}`] = null;
+    
+            try {
+                await db.ref().update(updates);
+                // If this client is the host, we can trigger redirection immediately
+                if (playerData.uid === hostId) {
+                    playerData.gameId = gameId;
+                    playerData.isHost = true;
+                    playerData.inQueue = false;
+                    redirectToPowerupSelection();
                 }
-            });
+            } catch (error) {
+                console.error("Matchmaking failed:", error);
+                statusMessage.textContent = "Error finding match. Please try again.";
+            }
         }
-
+    
+        function redirectToPowerupSelection() {
+            if (playerData.gameId && !playerData.inQueue) {
+                // Ensure queue entry is removed
+                db.ref(`queue/${playerData.uid}`).remove();
+                queueSection.style.display = 'none';
+                statusMessage.textContent = "Game found! Redirecting...";
+                setTimeout(() => {
+                    window.location.href = `powerup-selection.html?gameId=${playerData.gameId}&uid=${playerData.uid}&isHost=${playerData.isHost}`;
+                }, 1000); // Delay to ensure DB consistency
+            }
+        }
+    
+        function leaveQueue() {
+            playerData.inQueue = false;
+            db.ref(`queue/${playerData.uid}`).remove();
+            if (playerData.gameId) {
+                db.ref(`games/${playerData.gameId}`).remove();
+                playerData.gameId = null;
+            }
+            queueSection.style.display = 'none';
+            lobbySection.style.display = 'block';
+            statusMessage.textContent = "Left queue";
+        }
+    
         function generateGameId() {
             return 'game_' + Math.random().toString(36).substr(2, 9);
         }
-
+    
         function initializeGameState() {
             return {
-                host: { id: playerData.uid, displayName: playerData.displayName },
+                host: null,
                 guest: null,
                 currentScreen: "setup",
                 roundsToWin: 3,
@@ -307,7 +366,7 @@
                 actions: {}
             };
         }
-
+    
         function createInitialWalls() {
             const walls = [];
             const CANVAS_WIDTH = 800;
@@ -319,6 +378,10 @@
             walls.push({ x: CANVAS_WIDTH/2 - 50, y: CANVAS_HEIGHT/2 - 50, width: 100, height: 100, angle: 0, breakable: false, bouncy: false });
             return walls;
         }
+    
+        window.addEventListener('beforeunload', () => {
+            leaveQueue();
+        });
     </script>
 </body>
-</html> 
+</html>
