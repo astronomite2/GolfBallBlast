@@ -255,6 +255,413 @@
     <!-- Scripts -->
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
-    <script src="golfballblastmultiplayer.js"></script>
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCZR0yqDxpcSBSNeeXzM4TJBAC5yPKBX2c",
+            authDomain: "golf-ball-blast.firebaseapp.com",
+            projectId: "golf-ball-blast",
+            storageBucket: "golf-ball-blast.firebasestorage.app",
+            messagingSenderId: "30314302279",
+            appId: "1:30314302279:web:1269fa089866e05a165a62",
+            measurementId: "G-1X377HF780"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameId = urlParams.get('gameId');
+        const uid = urlParams.get('uid');
+        const isHost = urlParams.get('isHost') === 'true';
+
+        // MultiplayerGame Class
+        class MultiplayerGame {
+            constructor(gameId, isHost) {
+                this.gameId = gameId;
+                this.isHost = isHost;
+                this.playerId = uid;
+                this.db = firebase.database();
+                this.gameRef = this.db.ref(`games/${gameId}`);
+                this.setupGameListeners();
+                this.initializeGame();
+            }
+
+            setupGameListeners() {
+                this.gameRef.child('state').on('value', snapshot => {
+                    const state = snapshot.val();
+                    if (state) {
+                        this.updateGameState(state);
+                    }
+                });
+
+                this.gameRef.child('actions').on('child_added', snapshot => {
+                    const action = snapshot.val();
+                    this.handlePlayerAction(action);
+                });
+
+                this.gameRef.child('host').on('value', snapshot => {
+                    const host = snapshot.val();
+                    if (host) {
+                        document.getElementById('player1Name').textContent = host.displayName;
+                    }
+                });
+
+                this.gameRef.child('guest').on('value', snapshot => {
+                    const guest = snapshot.val();
+                    if (guest) {
+                        document.getElementById('player2Name').textContent = guest.displayName;
+                    }
+                });
+            }
+
+            initializeGame() {
+                // DOM Elements
+                this.canvas = document.getElementById("gameCanvas");
+                this.ctx = this.canvas.getContext("2d");
+                this.powerBar = document.getElementById("powerBar");
+                this.angleIndicator = document.getElementById("angleIndicator");
+                this.scoreDisplay = document.getElementById("scoreDisplay");
+                this.messageDisplay = document.getElementById("messageDisplay");
+
+                // Event Listeners
+                this.canvas.addEventListener("mousedown", this.handleMouseDown.bind(this));
+                this.canvas.addEventListener("mousemove", this.handleMouseMove.bind(this));
+                this.canvas.addEventListener("mouseup", this.handleMouseUp.bind(this));
+                document.getElementById("playAgainButton").addEventListener("click", () => {
+                    window.location.href = 'multiplayer-lobby.html';
+                });
+
+                // Start game loop
+                requestAnimationFrame(this.gameLoop.bind(this));
+            }
+
+            updateGameState(state) {
+                window.gameState = { ...window.gameState, ...state };
+                this.render();
+                this.updateUI();
+            }
+
+            handlePlayerAction(action) {
+                switch (action.type) {
+                    case 'shot':
+                        this.handleShot(action);
+                        break;
+                    case 'powerup':
+                        this.handlePowerup(action);
+                        break;
+                }
+            }
+
+            sendAction(action) {
+                this.gameRef.child('actions').push(action);
+            }
+
+            handleShot(action) {
+                const ball = window.gameState.balls[action.player];
+                ball.vx = action.vx;
+                ball.vy = action.vy;
+                window.gameState.hasShot = true;
+            }
+
+            handlePowerup(action) {
+                const powerup = window.gameState.powerups[action.powerupIndex];
+                switch (powerup.name) {
+                    case "Super Swing":
+                        // Handled in shot
+                        break;
+                    case "Wall Placement":
+                        window.gameState.walls.push(action.wall);
+                        window.gameState.activePowerups.push({
+                            type: "Wall Placement",
+                            wall: action.wall,
+                            turnsLeft: 2
+                        });
+                        break;
+                    case "Bounce Wall":
+                        const wall = window.gameState.walls[action.wallIndex];
+                        wall.bouncy = true;
+                        wall.bouncyTurnsLeft = 3;
+                        window.gameState.activePowerups.push({
+                            type: "Bounce Wall",
+                            wall: wall,
+                            turnsLeft: 3
+                        });
+                        break;
+                }
+                powerup.currentCooldowns[action.player] = powerup.cooldown;
+            }
+
+            handleMouseDown(e) {
+                if (window.gameState.currentScreen !== "game" || this.isBallMoving() || 
+                    window.gameState.currentPlayer !== (this.isHost ? 0 : 1)) return;
+
+                const rect = this.canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const currentBall = window.gameState.balls[window.gameState.currentPlayer];
+
+                const dx = mouseX - currentBall.x;
+                const dy = mouseY - currentBall.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < 10 * 3) {
+                    window.gameState.isAiming = true;
+                    window.gameState.swingPower = 0;
+                    window.gameState.swingAngle = Math.atan2(dy, dx);
+                }
+            }
+
+            handleMouseMove(e) {
+                if (!window.gameState.isAiming) return;
+
+                const rect = this.canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const currentBall = window.gameState.balls[window.gameState.currentPlayer];
+
+                const dx = mouseX - currentBall.x;
+                const dy = mouseY - currentBall.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                window.gameState.swingAngle = Math.atan2(dy, dx);
+                window.gameState.swingPower = Math.min(distance / 10, 15);
+
+                this.updatePowerBar();
+                this.updateAngleIndicator();
+            }
+
+            handleMouseUp() {
+                if (!window.gameState.isAiming) return;
+
+                let power = window.gameState.swingPower;
+                if (window.gameState.selectedPowerups[window.gameState.currentPlayer] !== null &&
+                    window.gameState.powerups[window.gameState.selectedPowerups[window.gameState.currentPlayer]].name === "Super Swing" &&
+                    window.gameState.powerups[window.gameState.selectedPowerups[window.gameState.currentPlayer]].currentCooldowns[window.gameState.currentPlayer] === 0) {
+                    power *= 2;
+                    this.sendAction({
+                        type: 'powerup',
+                        player: window.gameState.currentPlayer,
+                        powerupIndex: window.gameState.selectedPowerups[window.gameState.currentPlayer]
+                    });
+                }
+
+                const vx = Math.cos(window.gameState.swingAngle) * power;
+                const vy = Math.sin(window.gameState.swingAngle) * power;
+
+                this.sendAction({
+                    type: 'shot',
+                    player: window.gameState.currentPlayer,
+                    vx: vx,
+                    vy: vy
+                });
+
+                window.gameState.isAiming = false;
+            }
+
+            isBallMoving() {
+                return window.gameState.balls.some(ball => 
+                    Math.abs(ball.vx) > 0.01 || Math.abs(ball.vy) > 0.01
+                );
+            }
+
+            updatePowerBar() {
+                const percentage = (window.gameState.swingPower / 15) * 100;
+                this.powerBar.style.width = `${percentage}%`;
+                if (percentage < 30) this.powerBar.style.backgroundColor = "#00FF00";
+                else if (percentage < 70) this.powerBar.style.backgroundColor = "#FFFF00";
+                else this.powerBar.style.backgroundColor = "#FF0000";
+            }
+
+            updateAngleIndicator() {
+                const angle = window.gameState.swingAngle * (180 / Math.PI);
+                this.angleIndicator.textContent = `Angle: ${angle.toFixed(1)}°`;
+            }
+
+            updateUI() {
+                this.scoreDisplay.textContent = `Player 1: ${window.gameState.scores[0]} - Player 2: ${window.gameState.scores[1]}`;
+                const playerColor = ["#FF0000", "#0000FF"][window.gameState.currentPlayer];
+                this.messageDisplay.innerHTML = `
+                    <span>Round ${window.gameState.currentRound} - Player ${window.gameState.currentPlayer + 1}'s Turn</span>
+                    <span class="player-indicator" style="background-color: ${playerColor}"></span>
+                `;
+                // Update powerup UI (simplified for now)
+                const container = document.getElementById("powerupContainer");
+                container.innerHTML = "";
+                const selectedPowerupIndex = window.gameState.selectedPowerups[window.gameState.currentPlayer];
+                if (selectedPowerupIndex !== null) {
+                    const powerup = window.gameState.powerups[selectedPowerupIndex];
+                    const button = document.createElement("button");
+                    button.className = "powerup-button";
+                    button.innerHTML = `
+                        <div class="powerup-icon">${powerup.icon}</div>
+                        <div class="powerup-name">${powerup.name}</div>
+                        <div class="powerup-cooldown">${powerup.currentCooldowns[window.gameState.currentPlayer] > 0 ? `CD: ${powerup.currentCooldowns[window.gameState.currentPlayer]}` : 'Ready'}</div>
+                    `;
+                    container.appendChild(button);
+                }
+            }
+
+            gameLoop() {
+                this.update();
+                this.render();
+                requestAnimationFrame(this.gameLoop.bind(this));
+            }
+
+            update() {
+                if (window.gameState.currentScreen !== "game") return;
+
+                this.updateBalls();
+                this.checkRoundEnd();
+
+                const currentBall = window.gameState.balls[window.gameState.currentPlayer];
+                const isCurrentBallStopped = Math.abs(currentBall.vx) < 0.01 && Math.abs(currentBall.vy) < 0.01;
+                if (isCurrentBallStopped && window.gameState.hasShot && this.isHost) {
+                    this.nextTurn();
+                }
+            }
+
+            updateBalls() {
+                // Simplified physics update (client-side prediction)
+                for (let ball of window.gameState.balls) {
+                    ball.vx *= 0.98;
+                    ball.vy *= 0.98;
+                    if (Math.abs(ball.vx) < 0.01) ball.vx = 0;
+                    if (Math.abs(ball.vy) < 0.01) ball.vy = 0;
+                    ball.x += ball.vx;
+                    ball.y += ball.vy;
+                    this.checkWallCollisions(ball);
+                }
+            }
+
+            checkWallCollisions(ball) {
+                if (ball.x < 10) { ball.x = 10; ball.vx = -ball.vx * 0.8; }
+                else if (ball.x > 800 - 10) { ball.x = 800 - 10; ball.vx = -ball.vx * 0.8; }
+                if (ball.y < 10) { ball.y = 10; ball.vy = -ball.vy * 0.8; }
+                else if (ball.y > 600 - 10) { ball.y = 600 - 10; ball.vy = -ball.vy * 0.8; }
+            }
+
+            checkRoundEnd() {
+                for (let i = 0; i < window.gameState.balls.length; i++) {
+                    const ball = window.gameState.balls[i];
+                    const targetHole = window.gameState.holes[i];
+                    const dx = ball.x - targetHole.x;
+                    const dy = ball.y - targetHole.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < 15 && this.isHost) {
+                        window.gameState.scores[i]++;
+                        if (window.gameState.scores[i] >= window.gameState.roundsToWin) {
+                            this.showGameEnd(i);
+                        } else {
+                            window.gameState.currentRound++;
+                            this.showRoundEnd(i);
+                        }
+                        this.gameRef.child('state').set(window.gameState);
+                        break;
+                    }
+                }
+            }
+
+            nextTurn() {
+                window.gameState.hasShot = false;
+                if (window.gameState.currentPlayer === 1) {
+                    window.gameState.powerups.forEach(p => {
+                        p.currentCooldowns[0] = Math.max(0, p.currentCooldowns[0] - 1);
+                        p.currentCooldowns[1] = Math.max(0, p.currentCooldowns[1] - 1);
+                    });
+                }
+                window.gameState.currentPlayer = 1 - window.gameState.currentPlayer;
+                this.gameRef.child('state').set(window.gameState);
+            }
+
+            showRoundEnd(winner) {
+                window.gameState.currentScreen = "roundEnd";
+                this.gameRef.child('state').set(window.gameState);
+                setTimeout(() => {
+                    if (this.isHost) {
+                        window.gameState.currentScreen = "game";
+                        window.gameState.balls[0].x = 800 * 0.15;
+                        window.gameState.balls[0].y = 600 * 0.15;
+                        window.gameState.balls[1].x = 800 * 0.85;
+                        window.gameState.balls[1].y = 600 * 0.85;
+                        window.gameState.balls[0].vx = 0;
+                        window.gameState.balls[0].vy = 0;
+                        window.gameState.balls[1].vx = 0;
+                        window.gameState.balls[1].vy = 0;
+                        this.gameRef.child('state').set(window.gameState);
+                    }
+                }, 3000);
+            }
+
+            showGameEnd(winner) {
+                window.gameState.currentScreen = "gameEnd";
+                document.getElementById("gameScreen").style.display = "none";
+                document.getElementById("gameEndScreen").style.display = "flex";
+                document.getElementById("winnerMessage").textContent = `Player ${winner + 1} wins the game!`;
+                this.gameRef.child('state').set(window.gameState);
+            }
+
+            render() {
+                this.ctx.fillStyle = "#8CC067";
+                this.ctx.fillRect(0, 0, 800, 600);
+
+                if (window.gameState.currentScreen === "game" || window.gameState.currentScreen === "roundEnd") {
+                    // Render holes
+                    window.gameState.holes.forEach(hole => {
+                        this.ctx.beginPath();
+                        this.ctx.arc(hole.x, hole.y, 15, 0, Math.PI * 2);
+                        this.ctx.fillStyle = "#000000";
+                        this.ctx.fill();
+                        this.ctx.beginPath();
+                        this.ctx.arc(hole.x, hole.y, 17, 0, Math.PI * 2);
+                        this.ctx.strokeStyle = hole.color;
+                        this.ctx.lineWidth = 2;
+                        this.ctx.stroke();
+                    });
+
+                    // Render walls
+                    window.gameState.walls.forEach(wall => {
+                        this.ctx.save();
+                        const centerX = wall.x + wall.width / 2;
+                        const centerY = wall.y + wall.height / 2;
+                        this.ctx.translate(centerX, centerY);
+                        this.ctx.rotate(wall.angle);
+                        this.ctx.fillStyle = wall.bouncy ? "#0000FF" : "#555555";
+                        this.ctx.fillRect(-wall.width / 2, -wall.height / 2, wall.width, wall.height);
+                        this.ctx.restore();
+                    });
+
+                    // Render balls
+                    window.gameState.balls.forEach(ball => {
+                        this.ctx.beginPath();
+                        this.ctx.arc(ball.x, ball.y, 10, 0, Math.PI * 2);
+                        this.ctx.fillStyle = ball.color;
+                        this.ctx.fill();
+                    });
+
+                    // Render aiming line
+                    if (window.gameState.isAiming && window.gameState.currentPlayer === (this.isHost ? 0 : 1)) {
+                        const ball = window.gameState.balls[window.gameState.currentPlayer];
+                        const aimX = ball.x - Math.cos(window.gameState.swingAngle) * window.gameState.swingPower * 5;
+                        const aimY = ball.y - Math.sin(window.gameState.swingAngle) * window.gameState.swingPower * 5;
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(ball.x, ball.y);
+                        this.ctx.lineTo(aimX, aimY);
+                        this.ctx.strokeStyle = "#FFFFFF";
+                        this.ctx.lineWidth = 2;
+                        this.ctx.setLineDash([5, 3]);
+                        this.ctx.stroke();
+                        this.ctx.setLineDash([]);
+                    }
+                }
+            }
+        }
+
+        // Initialize the game
+        const game = new MultiplayerGame(gameId, isHost);
+    </script>
 </body>
 </html> 

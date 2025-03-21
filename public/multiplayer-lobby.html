@@ -154,7 +154,218 @@
     
     <!-- Scripts -->
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
-    <script src="golfballblastmultiplayer.js"></script>
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCZR0yqDxpcSBSNeeXzM4TJBAC5yPKBX2c",
+            authDomain: "golf-ball-blast.firebaseapp.com",
+            projectId: "golf-ball-blast",
+            storageBucket: "golf-ball-blast.firebasestorage.app",
+            messagingSenderId: "30314302279",
+            appId: "1:30314302279:web:1269fa089866e05a165a62",
+            measurementId: "G-1X377HF780"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        // DOM Elements
+        const displayNameInput = document.getElementById('display-name');
+        const joinQueueButton = document.getElementById('join-queue');
+        const leaveQueueButton = document.getElementById('leave-queue');
+        const lobbySection = document.getElementById('lobby-section');
+        const queueSection = document.getElementById('queue-section');
+        const statusMessage = document.getElementById('status-message');
+
+        // Player Data
+        let playerData = {
+            uid: null,
+            displayName: '',
+            gameId: null,
+            isHost: false
+        };
+
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        playerData.uid = urlParams.get('uid');
+        const defaultDisplayName = decodeURIComponent(urlParams.get('displayName') || '');
+        displayNameInput.value = defaultDisplayName;
+
+        // Event Listeners
+        joinQueueButton.addEventListener('click', joinQueue);
+        leaveQueueButton.addEventListener('click', leaveQueue);
+        displayNameInput.addEventListener('input', validateName);
+
+        function validateName() {
+            const name = displayNameInput.value.trim();
+            joinQueueButton.disabled = name.length < 3;
+        }
+
+        async function joinQueue() {
+            const displayName = displayNameInput.value.trim();
+            if (displayName.length < 3) return;
+
+            playerData.displayName = displayName;
+            lobbySection.style.display = 'none';
+            queueSection.style.display = 'block';
+
+            const queueRef = db.ref('queue');
+            const waitingPlayers = await queueRef.once('value');
+
+            if (!waitingPlayers.exists()) {
+                createGame();
+            } else {
+                joinExistingGame(waitingPlayers);
+            }
+        }
+
+        function leaveQueue() {
+            if (playerData.gameId) {
+                db.ref(`games/${playerData.gameId}`).remove();
+            }
+            db.ref(`queue/${playerData.uid}`).remove();
+            queueSection.style.display = 'none';
+            lobbySection.style.display = 'block';
+        }
+
+        function createGame() {
+            const gameId = generateGameId();
+            playerData.gameId = gameId;
+            playerData.isHost = true;
+
+            db.ref(`queue/${playerData.uid}`).set({
+                displayName: playerData.displayName,
+                gameId: gameId,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+
+            const gameData = initializeGameState();
+            const gameRef = db.ref(`games/${gameId}`);
+            gameRef.set(gameData);
+
+            listenForOpponent(gameId);
+        }
+
+        function joinExistingGame(waitingPlayers) {
+            const games = Object.entries(waitingPlayers.val());
+            const oldestGame = games.sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+            const [hostId, hostData] = oldestGame;
+
+            playerData.gameId = hostData.gameId;
+            playerData.isHost = false;
+
+            const gameRef = db.ref(`games/${hostData.gameId}`);
+            gameRef.child('guest').set({
+                id: playerData.uid,
+                displayName: playerData.displayName
+            });
+
+            db.ref(`queue/${hostId}`).remove();
+            startMultiplayerGame();
+        }
+
+        function listenForOpponent(gameId) {
+            const gameRef = db.ref(`games/${gameId}`);
+            gameRef.child('guest').on('value', (snapshot) => {
+                if (snapshot.exists()) {
+                    db.ref(`queue/${playerData.uid}`).remove();
+                    startMultiplayerGame();
+                }
+            });
+        }
+
+        function startMultiplayerGame() {
+            window.location.href = `golfballblastmultiplayer.html?gameId=${playerData.gameId}&uid=${playerData.uid}&isHost=${playerData.isHost}`;
+        }
+
+        function generateGameId() {
+            return 'game_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // Initialize game state (similar to golfballblast.js)
+        function initializeGameState() {
+            return {
+                host: {
+                    id: playerData.uid,
+                    displayName: playerData.displayName
+                },
+                guest: null,
+                currentScreen: "setup",
+                roundsToWin: 3,
+                currentRound: 1,
+                currentPlayer: 0,
+                scores: [0, 0],
+                balls: [
+                    { x: 800 * 0.15, y: 600 * 0.15, vx: 0, vy: 0, color: "#FF0000" },
+                    { x: 800 * 0.85, y: 600 * 0.85, vx: 0, vy: 0, color: "#0000FF" }
+                ],
+                holes: [
+                    { x: 800 * 0.85, y: 600 * 0.15, color: "#0000FF" },
+                    { x: 800 * 0.15, y: 600 * 0.85, color: "#FF0000" }
+                ],
+                walls: createInitialWalls(),
+                powerups: [
+                    { name: "Super Swing", description: "Double swing power. Can break certain walls.", cooldown: 2, currentCooldowns: [0, 0], icon: "🔨" },
+                    { name: "Wall Placement", description: "Place a temporary wall that lasts 2 turns.", cooldown: 1, currentCooldowns: [0, 0], icon: "🧱" },
+                    { name: "Bounce Wall", description: "Convert a wall to a super bouncy surface for 2 turns.", cooldown: 2, currentCooldowns: [0, 0], icon: "🔄" }
+                ],
+                selectedPowerups: [null, null],
+                activePowerups: [],
+                swingPower: 0,
+                swingAngle: 0,
+                isAiming: false,
+                hasShot: false,
+                wallPlacementMode: false,
+                previewWall: null,
+                bounceWallMode: false,
+                hoveredWall: null,
+                actions: {}
+            };
+        }
+
+        function createInitialWalls() {
+            const walls = [];
+            const CANVAS_WIDTH = 800;
+            const CANVAS_HEIGHT = 600;
+            addWall(walls, 0, 0, CANVAS_WIDTH, 10);
+            addWall(walls, 0, CANVAS_HEIGHT - 10, CANVAS_WIDTH, 10);
+            addWall(walls, 0, 0, 10, CANVAS_HEIGHT);
+            addWall(walls, CANVAS_WIDTH - 10, 0, 10, CANVAS_HEIGHT);
+            addWall(walls, CANVAS_WIDTH/2 - 50, CANVAS_HEIGHT/2 - 50, 100, 100);
+            addWall(walls, CANVAS_WIDTH/4, CANVAS_HEIGHT/4, 150, 15, Math.PI/6);
+            addWall(walls, CANVAS_WIDTH*3/4, CANVAS_HEIGHT*3/4, 150, 15, -Math.PI/6);
+            return walls;
+        }
+
+        function addWall(walls, x, y, width, height, angle = 0) {
+            walls.push({
+                x, y, width, height, angle,
+                breakable: false,
+                bouncy: false,
+                vertices: calculateWallVertices(x, y, width, height, angle)
+            });
+        }
+
+        function calculateWallVertices(x, y, width, height, angle) {
+            const halfWidth = width / 2;
+            const halfHeight = height / 2;
+            const centerX = x + halfWidth;
+            const centerY = y + halfHeight;
+            const vertices = [
+                { x: -halfWidth, y: -halfHeight },
+                { x: halfWidth, y: -halfHeight },
+                { x: halfWidth, y: halfHeight },
+                { x: -halfWidth, y: halfHeight }
+            ];
+            return vertices.map(vertex => {
+                const rotatedX = vertex.x * Math.cos(angle) - vertex.y * Math.sin(angle);
+                const rotatedY = vertex.x * Math.sin(angle) + vertex.y * Math.cos(angle);
+                return { x: rotatedX + centerX, y: rotatedY + centerY };
+            });
+        }
+    </script>
 </body>
 </html> 
