@@ -84,40 +84,65 @@
             powerupGrid.appendChild(button);
         });
     
+        // Check authentication
+        firebase.auth().onAuthStateChanged((user) => {
+            if (!user) {
+                console.error("User not authenticated. UID from URL:", uid);
+                status.textContent = "Authentication error. Please sign in again.";
+                return;
+            }
+            console.log("Authenticated user:", user.uid);
+        });
+    
         readyButton.addEventListener('click', async () => {
             const playerIndex = isHost ? 0 : 1;
-            try {
-                await gameRef.child(`selectedPowerups/${playerIndex}`).set(selectedPowerup);
-                await gameRef.child(`ready/${playerIndex}`).set(true);
-                readyButton.disabled = true;
-                status.textContent = "Waiting for opponent to ready up...";
-            } catch (error) {
-                console.error("Error setting ready state:", error);
-                status.textContent = "Error preparing game. Try again.";
+            if (firebase.auth().currentUser) {
+                try {
+                    console.log(`Setting selectedPowerups/${playerIndex} to ${selectedPowerup}`);
+                    await gameRef.child(`selectedPowerups/${playerIndex}`).set(selectedPowerup);
+                    console.log(`Setting ready/${playerIndex} to true`);
+                    await gameRef.child(`ready/${playerIndex}`).set(true);
+                    readyButton.disabled = true;
+                    status.textContent = "Waiting for opponent to ready up...";
+                } catch (error) {
+                    console.error("Write error:", error);
+                    status.textContent = "Error preparing game. Check console.";
+                }
+            } else {
+                status.textContent = "Not signed in. Please reload and sign in.";
             }
         });
     
-        // Ensure listener is set up immediately
-        gameRef.once('value', (snapshot) => {
-            const gameData = snapshot.val();
-            if (!gameData.ready) {
-                gameRef.child('ready').set([false, false]); // Initialize if missing
-            }
-        }).then(() => {
-            gameRef.child('ready').on('value', (snapshot) => {
-                const readyStates = snapshot.val();
-                if (readyStates && readyStates[0] && readyStates[1]) {
-                    gameRef.update({ currentScreen: "game" })
-                        .then(() => {
-                            window.location.href = `golfballblastmultiplayer.html?gameId=${gameId}&uid=${uid}&isHost=${isHost}`;
-                        })
-                        .catch(error => {
-                            console.error("Error updating screen:", error);
-                            status.textContent = "Error starting game.";
-                        });
+        if (firebase.auth().currentUser) {
+            gameRef.once('value', (snapshot) => {
+                const gameData = snapshot.val();
+                if (!gameData || !gameData.ready || gameData.ready.length !== 2) {
+                    console.log("Initializing ready array");
+                    gameRef.child('ready').set([false, false]);
                 }
+            }).then(() => {
+                gameRef.child('ready').on('value', (snapshot) => {
+                    const readyStates = snapshot.val();
+                    console.log("Ready states:", readyStates);
+                    if (readyStates && readyStates[0] && readyStates[1]) {
+                        gameRef.update({ currentScreen: "game" })
+                            .then(() => {
+                                console.log("Redirecting to game...");
+                                window.location.href = `golfballblastmultiplayer.html?gameId=${gameId}&uid=${uid}&isHost=${isHost}`;
+                            })
+                            .catch(error => {
+                                console.error("Error updating screen:", error);
+                                status.textContent = "Error starting game.";
+                            });
+                    }
+                });
+            }).catch(error => {
+                console.error("Initial fetch error:", error);
+                status.textContent = "Cannot load game data.";
             });
-        });
+        } else {
+            status.textContent = "Authentication required. Please sign in.";
+        }
     </script>
 </body>
 </html>
