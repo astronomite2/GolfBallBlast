@@ -198,19 +198,16 @@
         const queueRef = db.ref('queue');
         const gamesRef = db.ref('games');
     
-        // Monitor queue updates
         queueRef.on('value', (snapshot) => {
             const queueData = snapshot.val();
             const playerCount = queueData ? Object.keys(queueData).length : 0;
             playerCountDisplay.textContent = `Players in queue: ${playerCount}`;
     
-            // Only the oldest player initiates matchmaking
             if (playerCount >= 2 && isOldestPlayer(queueData) && playerData.inQueue) {
                 matchPlayers();
             }
         });
     
-        // Monitor game assignments for this specific player
         gamesRef.on('child_added', (snapshot) => {
             handleGameUpdate(snapshot);
         });
@@ -223,16 +220,17 @@
             const gameId = snapshot.key;
             const gameData = snapshot.val();
     
-            if (gameData && gameData.host && gameData.guest && playerData.inQueue) {
-                if (playerData.uid === gameData.host.id) {
+            if (gameData && gameData.host && gameData.guest) {
+                const isHost = playerData.uid === gameData.host.id;
+                const isGuest = playerData.uid === gameData.guest.id;
+    
+                if (isHost || isGuest) {
                     playerData.gameId = gameId;
-                    playerData.isHost = true;
-                    playerData.inQueue = false;
-                    redirectToPowerupSelection();
-                } else if (playerData.uid === gameData.guest.id) {
-                    playerData.gameId = gameId;
-                    playerData.isHost = false;
-                    playerData.inQueue = false;
+                    playerData.isHost = isHost;
+                    if (playerData.inQueue) {
+                        playerData.inQueue = false;
+                        db.ref(`queue/${playerData.uid}`).remove();
+                    }
                     redirectToPowerupSelection();
                 }
             }
@@ -281,44 +279,25 @@
             const [hostId, hostData] = players[0];
             const [guestId, guestData] = players[1];
     
-            // Prevent matching if this player isn't one of the selected players
-            if (playerData.uid !== hostId && playerData.uid !== guestId) return;
-    
             const gameId = generateGameId();
             const gameData = initializeGameState();
             gameData.host = { id: hostId, displayName: hostData.displayName };
             gameData.guest = { id: guestId, displayName: guestData.displayName };
     
-            // Atomically create game and remove players from queue
-            const updates = {};
-            updates[`games/${gameId}`] = gameData;
-            updates[`queue/${hostId}`] = null;
-            updates[`queue/${guestId}`] = null;
-    
-            try {
-                await db.ref().update(updates);
-                // If this client is the host, we can trigger redirection immediately
-                if (playerData.uid === hostId) {
-                    playerData.gameId = gameId;
-                    playerData.isHost = true;
-                    playerData.inQueue = false;
-                    redirectToPowerupSelection();
-                }
-            } catch (error) {
-                console.error("Matchmaking failed:", error);
-                statusMessage.textContent = "Error finding match. Please try again.";
-            }
+            await db.ref(`games/${gameId}`).set(gameData);
+            await Promise.all([
+                db.ref(`queue/${hostId}`).remove(),
+                db.ref(`queue/${guestId}`).remove()
+            ]);
         }
     
         function redirectToPowerupSelection() {
-            if (playerData.gameId && !playerData.inQueue) {
-                // Ensure queue entry is removed
-                db.ref(`queue/${playerData.uid}`).remove();
+            if (playerData.gameId) {
                 queueSection.style.display = 'none';
                 statusMessage.textContent = "Game found! Redirecting...";
                 setTimeout(() => {
                     window.location.href = `powerup-selection.html?gameId=${playerData.gameId}&uid=${playerData.uid}&isHost=${playerData.isHost}`;
-                }, 1000); // Delay to ensure DB consistency
+                }, 1000);
             }
         }
     

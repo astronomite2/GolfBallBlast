@@ -45,28 +45,28 @@
             appId: "1:30314302279:web:1269fa089866e05a165a62",
             measurementId: "G-1X377HF780"
         };
-
+    
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-
+    
         const urlParams = new URLSearchParams(window.location.search);
         const gameId = urlParams.get('gameId');
         const uid = urlParams.get('uid');
         const isHost = urlParams.get('isHost') === 'true';
         const gameRef = db.ref(`games/${gameId}`);
-
+    
         const powerups = [
             { name: "Super Swing", description: "Double swing power. Can break certain walls.", icon: "🔨" },
             { name: "Wall Placement", description: "Place a temporary wall that lasts 2 turns.", icon: "🧱" },
             { name: "Bounce Wall", description: "Convert a wall to a super bouncy surface for 2 turns.", icon: "🔄" }
         ];
-
+    
         let selectedPowerup = null;
-
+    
         const powerupGrid = document.getElementById('powerupGrid');
         const readyButton = document.getElementById('readyButton');
         const status = document.getElementById('status');
-
+    
         powerups.forEach((powerup, index) => {
             const button = document.createElement('div');
             button.className = 'powerup-button';
@@ -83,21 +83,40 @@
             });
             powerupGrid.appendChild(button);
         });
-
-        readyButton.addEventListener('click', () => {
+    
+        readyButton.addEventListener('click', async () => {
             const playerIndex = isHost ? 0 : 1;
-            gameRef.child(`selectedPowerups/${playerIndex}`).set(selectedPowerup);
-            gameRef.child(`ready/${playerIndex}`).set(true);
-            readyButton.disabled = true;
-            status.textContent = "Waiting for opponent to ready up...";
-        });
-
-        gameRef.child('ready').on('value', (snapshot) => {
-            const readyStates = snapshot.val();
-            if (readyStates && readyStates[0] && readyStates[1]) {
-                gameRef.update({ currentScreen: "game" });
-                window.location.href = `golfballblastmultiplayer.html?gameId=${gameId}&uid=${uid}&isHost=${isHost}`;
+            try {
+                await gameRef.child(`selectedPowerups/${playerIndex}`).set(selectedPowerup);
+                await gameRef.child(`ready/${playerIndex}`).set(true);
+                readyButton.disabled = true;
+                status.textContent = "Waiting for opponent to ready up...";
+            } catch (error) {
+                console.error("Error setting ready state:", error);
+                status.textContent = "Error preparing game. Try again.";
             }
+        });
+    
+        // Ensure listener is set up immediately
+        gameRef.once('value', (snapshot) => {
+            const gameData = snapshot.val();
+            if (!gameData.ready) {
+                gameRef.child('ready').set([false, false]); // Initialize if missing
+            }
+        }).then(() => {
+            gameRef.child('ready').on('value', (snapshot) => {
+                const readyStates = snapshot.val();
+                if (readyStates && readyStates[0] && readyStates[1]) {
+                    gameRef.update({ currentScreen: "game" })
+                        .then(() => {
+                            window.location.href = `golfballblastmultiplayer.html?gameId=${gameId}&uid=${uid}&isHost=${isHost}`;
+                        })
+                        .catch(error => {
+                            console.error("Error updating screen:", error);
+                            status.textContent = "Error starting game.";
+                        });
+                }
+            });
         });
     </script>
 </body>
