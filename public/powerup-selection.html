@@ -34,6 +34,7 @@
     </div>
 
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
     <script>
         const firebaseConfig = {
@@ -45,28 +46,30 @@
             appId: "1:30314302279:web:1269fa089866e05a165a62",
             measurementId: "G-1X377HF780"
         };
-    
+
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-    
+
         const urlParams = new URLSearchParams(window.location.search);
         const gameId = urlParams.get('gameId');
         const uid = urlParams.get('uid');
         const isHost = urlParams.get('isHost') === 'true';
         const gameRef = db.ref(`games/${gameId}`);
-    
+
         const powerups = [
             { name: "Super Swing", description: "Double swing power. Can break certain walls.", icon: "🔨" },
             { name: "Wall Placement", description: "Place a temporary wall that lasts 2 turns.", icon: "🧱" },
             { name: "Bounce Wall", description: "Convert a wall to a super bouncy surface for 2 turns.", icon: "🔄" }
         ];
-    
+
         let selectedPowerup = null;
-    
+        let currentUser = null;
+
         const powerupGrid = document.getElementById('powerupGrid');
         const readyButton = document.getElementById('readyButton');
         const status = document.getElementById('status');
-    
+
+        // Populate powerup selection grid
         powerups.forEach((powerup, index) => {
             const button = document.createElement('div');
             button.className = 'powerup-button';
@@ -83,66 +86,89 @@
             });
             powerupGrid.appendChild(button);
         });
-    
-        // Check authentication
+
+        // Authentication and initialization
         firebase.auth().onAuthStateChanged((user) => {
             if (!user) {
                 console.error("User not authenticated. UID from URL:", uid);
                 status.textContent = "Authentication error. Please sign in again.";
+                readyButton.disabled = true;
                 return;
             }
+            currentUser = user;
             console.log("Authenticated user:", user.uid);
+
+            // Ensure game data is initialized properly
+            initializeGameData();
         });
-    
-        readyButton.addEventListener('click', async () => {
-            const playerIndex = isHost ? 0 : 1;
-            if (firebase.auth().currentUser) {
-                try {
-                    console.log(`Setting selectedPowerups/${playerIndex} to ${selectedPowerup}`);
-                    await gameRef.child(`selectedPowerups/${playerIndex}`).set(selectedPowerup);
-                    console.log(`Setting ready/${playerIndex} to true`);
-                    await gameRef.child(`ready/${playerIndex}`).set(true);
-                    readyButton.disabled = true;
-                    status.textContent = "Waiting for opponent to ready up...";
-                } catch (error) {
-                    console.error("Write error:", error);
-                    status.textContent = "Error preparing game. Check console.";
+
+        // Initialize or verify game data
+        async function initializeGameData() {
+            try {
+                const snapshot = await gameRef.once('value');
+                const gameData = snapshot.val();
+                if (!gameData || !gameData.ready) {
+                    console.log("Initializing ready array");
+                    await gameRef.child('ready').set([false, false]);
                 }
-            } else {
+                setupGameListeners();
+            } catch (error) {
+                console.error("Error initializing game data:", error);
+                status.textContent = "Error loading game. Please try again.";
+            }
+        }
+
+        // Set up real-time listeners
+        function setupGameListeners() {
+            gameRef.child('ready').on('value', (snapshot) => {
+                const readyStates = snapshot.val();
+                console.log("Ready states updated:", readyStates);
+                if (readyStates && readyStates[0] && readyStates[1]) {
+                    console.log("Both players ready, redirecting...");
+                    status.textContent = "Both players ready! Starting game...";
+                    redirectToGame();
+                } else {
+                    const opponentReady = isHost ? readyStates[1] : readyStates[0];
+                    status.textContent = opponentReady ? "Waiting for you to ready up..." : "Waiting for opponent...";
+                }
+            });
+        }
+
+        // Handle ready button click
+        readyButton.addEventListener('click', async () => {
+            if (!currentUser) {
                 status.textContent = "Not signed in. Please reload and sign in.";
+                return;
+            }
+
+            const playerIndex = isHost ? 0 : 1;
+            try {
+                console.log(`Setting selectedPowerups/${playerIndex} to ${selectedPowerup}`);
+                await gameRef.child(`selectedPowerups/${playerIndex}`).set(selectedPowerup);
+                console.log(`Setting ready/${playerIndex} to true`);
+                await gameRef.child(`ready/${playerIndex}`).set(true);
+                readyButton.disabled = true;
+                status.textContent = "You are ready! Waiting for opponent...";
+            } catch (error) {
+                console.error("Error setting ready state:", error);
+                status.textContent = "Error preparing game. Check console.";
             }
         });
-    
-        if (firebase.auth().currentUser) {
-            gameRef.once('value', (snapshot) => {
-                const gameData = snapshot.val();
-                if (!gameData || !gameData.ready || gameData.ready.length !== 2) {
-                    console.log("Initializing ready array");
-                    gameRef.child('ready').set([false, false]);
-                }
-            }).then(() => {
-                gameRef.child('ready').on('value', (snapshot) => {
-                    const readyStates = snapshot.val();
-                    console.log("Ready states:", readyStates);
-                    if (readyStates && readyStates[0] && readyStates[1]) {
-                        gameRef.update({ currentScreen: "game" })
-                            .then(() => {
-                                console.log("Redirecting to game...");
-                                window.location.href = `golfballblastmultiplayer.html?gameId=${gameId}&uid=${uid}&isHost=${isHost}`;
-                            })
-                            .catch(error => {
-                                console.error("Error updating screen:", error);
-                                status.textContent = "Error starting game.";
-                            });
-                    }
-                });
-            }).catch(error => {
-                console.error("Initial fetch error:", error);
-                status.textContent = "Cannot load game data.";
-            });
-        } else {
-            status.textContent = "Authentication required. Please sign in.";
+
+        // Redirect to game screen
+        function redirectToGame() {
+            gameRef.child('ready').off(); // Remove listener to prevent multiple redirects
+            setTimeout(() => {
+                window.location.href = `golfballblastmultiplayer.html?gameId=${gameId}&uid=${uid}&isHost=${isHost}`;
+            }, 1000); // Small delay for UI feedback
         }
+
+        // Handle page unload to clean up
+        window.addEventListener('beforeunload', () => {
+            if (!currentUser && gameId) {
+                gameRef.remove(); // Clean up game if user leaves before auth
+            }
+        });
     </script>
 </body>
 </html>

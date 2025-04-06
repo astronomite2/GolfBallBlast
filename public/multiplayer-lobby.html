@@ -283,6 +283,7 @@
             const gameData = initializeGameState();
             gameData.host = { id: hostId, displayName: hostData.displayName };
             gameData.guest = { id: guestId, displayName: guestData.displayName };
+            gameData.displayNames = [hostData.displayName, guestData.displayName];
     
             await db.ref(`games/${gameId}`).set(gameData);
             await Promise.all([
@@ -334,33 +335,21 @@
                     { x: 800 * 0.85, y: 600 * 0.15, color: "#0000FF" },
                     { x: 800 * 0.15, y: 600 * 0.85, color: "#FF0000" }
                 ],
-                walls: createInitialWalls(),
+                walls: [],
                 powerups: [
-                    { name: "Super Swing", description: "Double swing power. Can break certain walls.", cooldown: 2, currentCooldowns: [0, 0], icon: "🔨" },
-                    { name: "Wall Placement", description: "Place a temporary wall that lasts 2 turns.", cooldown: 1, currentCooldowns: [0, 0], icon: "🧱" },
-                    { name: "Bounce Wall", description: "Convert a wall to a super bouncy surface for 2 turns.", cooldown: 2, currentCooldowns: [0, 0], icon: "🔄" }
+                    { name: "Super Swing", icon: "💪", cooldown: 3, currentCooldowns: [0, 0] },
+                    { name: "Wall Placement", icon: "🧱", cooldown: 4, currentCooldowns: [0, 0] },
+                    { name: "Bounce Wall", icon: "🏓", cooldown: 3, currentCooldowns: [0, 0] }
                 ],
                 selectedPowerups: [null, null],
                 ready: [false, false],
-                actions: {}
+                displayNames: ["", ""]
             };
-        }
-    
-        function createInitialWalls() {
-            const walls = [];
-            const CANVAS_WIDTH = 800;
-            const CANVAS_HEIGHT = 600;
-            walls.push({ x: 0, y: 0, width: CANVAS_WIDTH, height: 10, angle: 0, breakable: false, bouncy: false });
-            walls.push({ x: 0, y: CANVAS_HEIGHT - 10, width: CANVAS_WIDTH, height: 10, angle: 0, breakable: false, bouncy: false });
-            walls.push({ x: 0, y: 0, width: 10, height: CANVAS_HEIGHT, angle: 0, breakable: false, bouncy: false });
-            walls.push({ x: CANVAS_WIDTH - 10, y: 0, width: 10, height: CANVAS_HEIGHT, angle: 0, breakable: false, bouncy: false });
-            walls.push({ x: CANVAS_WIDTH/2 - 50, y: CANVAS_HEIGHT/2 - 50, width: 100, height: 100, angle: 0, breakable: false, bouncy: false });
-            return walls;
         }
     
         window.addEventListener('beforeunload', () => {
             leaveQueue();
         });
     </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'92c3a1adc9cd8dfa',t:'MTc0Mzk2NzExMS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

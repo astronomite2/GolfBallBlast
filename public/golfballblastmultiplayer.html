@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golf Arena - Multiplayer</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; background-color: #132614; color: white; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { display: flex; flex-direction: column; align-items: center; max-width: 900px; margin: 0 auto; }
+        #gameScreen { display: flex; flex-direction: column; align-items: center; }
+        .game-header { display: flex; justify-content: space-between; width: 100%; margin-bottom: 1rem; }
+        .score-display { font-size: 1.2rem; font-weight: bold; background-color: rgba(0,0,0,0.3); padding: 0.5rem 1rem; border-radius: 5px; }
+        .message-display { font-size: 1.2rem; margin-bottom: 0.5rem; height: 1.5rem; text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .player-indicator { width: 20px; height: 20px; border-radius: 50%; display: inline-block; border: 2px solid white; }
+        #gameCanvas { background-color: #8CC067; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.5); cursor: crosshair; }
+        .game-controls { display: flex; justify-content: space-between; width: 100%; margin-top: 1rem; }
+        .power-container { width: 200px; height: 20px; background-color: #333; border-radius: 10px; overflow: hidden; }
+        #powerBar { height: 100%; width: 0; background-color: #00FF00; transition: width 0.1s ease; }
+        .angle-display { font-size: 1rem; }
+        #powerupContainer { display: flex; gap: 10px; margin-top: 1rem; }
+        .powerup-button { background-color: #555555; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; transition: all 0.3s ease; width: 100px; text-align: center; }
+        .powerup-button:hover:not(.disabled) { background-color: #666666; }
+        .powerup-button.active { background-color: #888888; }
+        .powerup-button.disabled { background-color: #333333; cursor: not-allowed; opacity: 0.7; }
+        .powerup-icon { font-size: 24px; margin-bottom: 5px; }
+        .powerup-name { font-size: 12px; margin-bottom: 3px; }
+        .powerup-cooldown { font-size: 10px; color: #cccccc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="gameScreen">
+            <div class="game-header">
+                <div id="scoreDisplay" class="score-display">Player 1: 0 - Player 2: 0</div>
+            </div>
+            <div id="messageDisplay" class="message-display">Waiting for opponent...</div>
+            <canvas id="gameCanvas" width="800" height="600"></canvas>
+            <div class="game-controls">
+                <div class="power-container">
+                    <div id="powerBar"></div>
+                </div>
+                <div id="angleIndicator" class="angle-display">Angle: 0°</div>
+            </div>
+            <div id="powerupContainer"></div>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCZR0yqDxpcSBSNeeXzM4TJBAC5yPKBX2c",
+            authDomain: "golf-ball-blast.firebaseapp.com",
+            projectId: "golf-ball-blast",
+            storageBucket: "golf-ball-blast.firebasestorage.app",
+            messagingSenderId: "30314302279",
+            appId: "1:30314302279:web:1269fa089866e05a165a62",
+            measurementId: "G-1X377HF780"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameId = urlParams.get('gameId');
+        const uid = urlParams.get('uid');
+        const isHost = urlParams.get('isHost') === 'true';
+        const gameRef = db.ref(`games/${gameId}`);
+
+        const CANVAS_WIDTH = 800, CANVAS_HEIGHT = 600, BALL_RADIUS = 10, HOLE_RADIUS = 15, MAX_POWER = 15, FRICTION = 0.98;
+        const WALL_COLORS = { NORMAL: "#555555", BOUNCY: "#0000FF" };
+        const PLAYER_COLORS = ["#FF0000", "#0000FF"];
+
+        let canvas, ctx, powerBar, angleIndicator, powerupContainer, scoreDisplay, messageDisplay;
+        let gameState = {
+            currentScreen: "game",
+            roundsToWin: 3,
+            currentRound: 1,
+            currentPlayer: 0,
+            scores: [0, 0],
+            balls: [
+                { x: CANVAS_WIDTH * 0.15, y: CANVAS_HEIGHT * 0.15, vx: 0, vy: 0, color: PLAYER_COLORS[0] },
+                { x: CANVAS_WIDTH * 0.85, y: CANVAS_HEIGHT * 0.85, vx: 0, vy: 0, color: PLAYER_COLORS[1] }
+            ],
+            holes: [
+                { x: CANVAS_WIDTH * 0.85, y: CANVAS_HEIGHT * 0.15, color: PLAYER_COLORS[1] },
+                { x: CANVAS_WIDTH * 0.15, y: CANVAS_HEIGHT * 0.85, color: PLAYER_COLORS[0] }
+            ],
+            walls: [],
+            powerups: [
+                { name: "Super Swing", icon: "💪", cooldown: 3, currentCooldowns: [0, 0] },
+                { name: "Wall Placement", icon: "🧱", cooldown: 4, currentCooldowns: [0, 0] },
+                { name: "Bounce Wall", icon: "🏓", cooldown: 3, currentCooldowns: [0, 0] }
+            ],
+            selectedPowerups: [0, 0],
+            activePowerups: [],
+            displayNames: ["Player 1", "Player 2"],
+            swingPower: 0,
+            swingAngle: 0,
+            isAiming: false,
+            hasShot: false,
+            wallPlacementMode: false,
+            previewWall: null,
+            bounceWallMode: false,
+            hoveredWall: null
+        };
+        let myPlayerIndex = isHost ? 0 : 1;
+        let isInitialLoad = true;
+
+        function init() {
+            canvas = document.getElementById("gameCanvas");
+            ctx = canvas.getContext("2d");
+            powerBar = document.getElementById("powerBar");
+            angleIndicator = document.getElementById("angleIndicator");
+            powerupContainer = document.getElementById("powerupContainer");
+            scoreDisplay = document.getElementById("scoreDisplay");
+            messageDisplay = document.getElementById("messageDisplay");
+
+            canvas.width = CANVAS_WIDTH;
+            canvas.height = CANVAS_HEIGHT;
+
+            canvas.addEventListener("mousedown", handleMouseDown);
+            canvas.addEventListener("mousemove", handleMouseMove);
+            canvas.addEventListener("mouseup", handleMouseUp);
+
+            if (isHost && isInitialLoad) {
+                generateRandomObstacles();
+                syncGameState();
+            }
+            setupFirebaseListeners();
+            requestAnimationFrame(gameLoop);
+
+            gameRef.once('value', (snapshot) => {
+                if (isHost && snapshot.val() && !snapshot.val().walls.length) {
+                    generateRandomObstacles();
+                    syncGameState();
+                }
+            });
+        }
+
+        function setupFirebaseListeners() {
+            gameRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    gameState = {
+                        ...gameState,
+                        ...data,
+                        balls: data.balls ? data.balls.map(b => ({ ...b })) : gameState.balls,
+                        holes: data.holes ? data.holes.map(h => ({ ...h })) : gameState.holes,
+                        walls: data.walls ? data.walls.map(w => ({ ...w, vertices: calculateWallVertices(w.x, w.y, w.width, w.height, w.angle || 0) })) : gameState.walls,
+                        powerups: data.powerups ? data.powerups.map(p => ({ ...p })) : gameState.powerups,
+                        selectedPowerups: data.selectedPowerups || gameState.selectedPowerups,
+                        activePowerups: data.activePowerups ? data.activePowerups.map(ap => ({ ...ap })) : gameState.activePowerups,
+                        displayNames: data.displayNames || gameState.displayNames
+                    };
+                    if (isInitialLoad) {
+                        isInitialLoad = false;
+                        updateUI();
+                    }
+                }
+            });
+        }
+
+        function generateRandomObstacles() {
+            const numObstacles = 3;
+            gameState.walls = [];
+
+            gameState.walls.push({ x: 0, y: 0, width: CANVAS_WIDTH, height: 10, angle: 0, breakable: false, bouncy: false, vertices: calculateWallVertices(0, 0, CANVAS_WIDTH, 10, 0) });
+            gameState.walls.push({ x: 0, y: CANVAS_HEIGHT - 10, width: CANVAS_WIDTH, height: 10, angle: 0, breakable: false, bouncy: false, vertices: calculateWallVertices(0, CANVAS_HEIGHT - 10, CANVAS_WIDTH, 10, 0) });
+            gameState.walls.push({ x: 0, y: 0, width: 10, height: CANVAS_HEIGHT, angle: 0, breakable: false, bouncy: false, vertices: calculateWallVertices(0, 0, 10, CANVAS_HEIGHT, 0) });
+            gameState.walls.push({ x: CANVAS_WIDTH - 10, y: 0, width: 10, height: CANVAS_HEIGHT, angle: 0, breakable: false, bouncy: false, vertices: calculateWallVertices(CANVAS_WIDTH - 10, 0, 10, CANVAS_HEIGHT, 0) });
+
+            for (let i = 0; i < numObstacles; i++) {
+                let wall;
+                let attempts = 0;
+                const maxAttempts = 50;
+
+                do {
+                    wall = {
+                        x: Math.random() * (CANVAS_WIDTH - 100),
+                        y: Math.random() * (CANVAS_HEIGHT - 50),
+                        width: 50 + Math.random() * 50,
+                        height: 10 + Math.random() * 20,
+                        angle: Math.random() * Math.PI,
+                        breakable: false,
+                        bouncy: false,
+                        vertices: []
+                    };
+                    wall.vertices = calculateWallVertices(wall.x, wall.y, wall.width, wall.height, wall.angle);
+                    attempts++;
+                } while ((isOverlapping(wall) || !isPathClear(wall)) && attempts < maxAttempts);
+
+                if (attempts < maxAttempts) {
+                    gameState.walls.push(wall);
+                }
+            }
+        }
+
+        function isOverlapping(newWall) {
+            const buffer = BALL_RADIUS * 2;
+
+            for (let ball of gameState.balls) {
+                const centerX = newWall.x + newWall.width / 2;
+                const centerY = newWall.y + newWall.height / 2;
+                const dx = ball.x - centerX;
+                const dy = ball.y - centerY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < buffer + Math.max(newWall.width, newWall.height) / 2) {
+                    return true;
+                }
+            }
+
+            for (let wall of gameState.walls) {
+                const centerX1 = newWall.x + newWall.width / 2;
+                const centerY1 = newWall.y + newWall.height / 2;
+                const centerX2 = wall.x + wall.width / 2;
+                const centerY2 = wall.y + wall.height / 2;
+                const dx = centerX1 - centerX2;
+                const dy = centerY1 - centerY2;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < (Math.max(newWall.width, newWall.height) + Math.max(wall.width, wall.height)) / 2 + buffer) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        function isPathClear(wall) {
+            const buffer = BALL_RADIUS * 4;
+            for (let i = 0; i < 2; i++) {
+                const ball = gameState.balls[i];
+                const hole = gameState.holes[i];
+                const dx = hole.x - ball.x, dy = hole.y - ball.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const nx = dx / distance, ny = dy / distance;
+
+                const wallCenterX = wall.x + wall.width / 2, wallCenterY = wall.y + wall.height / 2;
+                const toWallX = wallCenterX - ball.x, toWallY = wallCenterY - ball.y;
+                const projection = toWallX * nx + toWallY * ny;
+
+                if (projection > 0 && projection < distance) {
+                    const closestX = ball.x + nx * projection;
+                    const closestY = ball.y + ny * projection;
+                    const distToWall = Math.sqrt((closestX - wallCenterX) ** 2 + (closestY - wallCenterY) ** 2);
+                    if (distToWall < buffer + Math.max(wall.width, wall.height) / 2) return false;
+                }
+            }
+            return true;
+        }
+
+        function updateUI() {
+            scoreDisplay.textContent = `${gameState.displayNames[0]}: ${gameState.scores[0]} - ${gameState.displayNames[1]}: ${gameState.scores[1]}`;
+            const isMyTurn = gameState.currentPlayer === myPlayerIndex;
+            updateMessageDisplay(isMyTurn ? "Your Turn" : `${gameState.displayNames[gameState.currentPlayer]}'s Turn`);
+            initializePowerupButtons(isMyTurn); // Pass turn status
+        }
+
+        function handleMouseDown(e) {
+            if (gameState.currentPlayer !== myPlayerIndex || isBallMoving()) return;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const currentBall = gameState.balls[myPlayerIndex];
+            const dx = mouseX - currentBall.x, dy = mouseY - currentBall.y;
+            if (Math.sqrt(dx * dx + dy * dy) < BALL_RADIUS * 3) {
+                gameState.isAiming = true;
+                gameState.swingPower = 0;
+                gameState.swingAngle = Math.atan2(dy, dx);
+            }
+        }
+
+        function handleMouseMove(e) {
+            if (!gameState.isAiming || gameState.currentPlayer !== myPlayerIndex) return;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const currentBall = gameState.balls[myPlayerIndex];
+            const dx = mouseX - currentBall.x, dy = mouseY - currentBall.y;
+            gameState.swingAngle = Math.atan2(dy, dx);
+            gameState.swingPower = Math.min(Math.sqrt(dx * dx + dy * dy) / 10, MAX_POWER);
+            updatePowerBar();
+            updateAngleIndicator();
+        }
+
+        function handleMouseUp() {
+            if (!gameState.isAiming || gameState.currentPlayer !== myPlayerIndex) return;
+            let power = gameState.swingPower;
+            const powerupButton = powerupContainer.querySelector(".powerup-button.active");
+            const selectedPowerupIndex = gameState.selectedPowerups[myPlayerIndex];
+            if (powerupButton && selectedPowerupIndex !== null && gameState.powerups[selectedPowerupIndex].name === "Super Swing") {
+                power *= 2;
+                consumePowerup("Super Swing");
+            }
+            const currentBall = gameState.balls[myPlayerIndex];
+            currentBall.vx = Math.cos(gameState.swingAngle) * power;
+            currentBall.vy = Math.sin(gameState.swingAngle) * power;
+            gameState.isAiming = false;
+            gameState.hasShot = true;
+            syncGameState();
+        }
+
+        function activatePowerup(powerupName) {
+            const selectedPowerupIndex = gameState.selectedPowerups[myPlayerIndex];
+            if (gameState.currentPlayer !== myPlayerIndex || selectedPowerupIndex === null || gameState.powerups[selectedPowerupIndex].currentCooldowns[myPlayerIndex] > 0) return;
+            switch (powerupName) {
+                case "Wall Placement":
+                    gameState.wallPlacementMode = true;
+                    gameState.previewWall = { x: 0, y: 0, width: 50, height: 10, angle: 0, alpha: 0.5 };
+                    updateMessageDisplay("Hold R to rotate wall, Click to place");
+                    document.addEventListener("keydown", handleWallRotation);
+                    document.addEventListener("keyup", handleWallRotation);
+                    canvas.addEventListener("mousemove", handleWallPreview);
+                    canvas.addEventListener("click", placeWall, { once: true });
+                    break;
+                case "Bounce Wall":
+                    gameState.bounceWallMode = true;
+                    updateMessageDisplay("Hover over a wall to make it bouncy");
+                    canvas.addEventListener("mousemove", handleWallHover);
+                    canvas.addEventListener("click", makeBounceWall, { once: true });
+                    break;
+            }
+        }
+
+        function handleWallRotation(e) {
+            if (!gameState.wallPlacementMode || gameState.currentPlayer !== myPlayerIndex) return;
+            if (e.key.toLowerCase() === 'r' && e.type === 'keydown') gameState.previewWall.angle += Math.PI / 8;
+        }
+
+        function handleWallPreview(e) {
+            if (!gameState.wallPlacementMode || gameState.currentPlayer !== myPlayerIndex) return;
+            const rect = canvas.getBoundingClientRect();
+            gameState.previewWall.x = (e.clientX - rect.left) - gameState.previewWall.width / 2;
+            gameState.previewWall.y = (e.clientY - rect.top) - gameState.previewWall.height / 2;
+        }
+
+        function placeWall(e) {
+            if (!gameState.wallPlacementMode || gameState.currentPlayer !== myPlayerIndex) return;
+            const wall = { ...gameState.previewWall, breakable: false, bouncy: false, temporary: true, turnsLeft: 2, vertices: calculateWallVertices(gameState.previewWall.x, gameState.previewWall.y, 50, 10, gameState.previewWall.angle) };
+            gameState.walls.push(wall);
+            gameState.activePowerups.push({ type: "Wall Placement", wall, turnsLeft: 2 });
+            gameState.wallPlacementMode = false;
+            gameState.previewWall = null;
+            document.removeEventListener("keydown", handleWallRotation);
+            document.removeEventListener("keyup", handleWallRotation);
+            canvas.removeEventListener("mousemove", handleWallPreview);
+            consumePowerup("Wall Placement");
+            syncGameState();
+            updateMessageDisplay(`Your Turn`);
+        }
+
+        function handleWallHover(e) {
+            if (!gameState.bounceWallMode || gameState.currentPlayer !== myPlayerIndex) return;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+            gameState.hoveredWall = null;
+            gameState.walls.forEach(wall => wall.isHovered = false);
+            for (let wall of gameState.walls) {
+                if (wall.bouncy) continue;
+                const centerX = wall.x + wall.width / 2, centerY = wall.y + wall.height / 2;
+                const dx = mouseX - centerX, dy = mouseY - centerY;
+                const rotatedX = dx * Math.cos(-wall.angle) - dy * Math.sin(-wall.angle);
+                const rotatedY = dx * Math.sin(-wall.angle) + dy * Math.cos(-wall.angle);
+                if (Math.abs(rotatedX) <= wall.width / 2 && Math.abs(rotatedY) <= wall.height / 2) {
+                    wall.isHovered = true;
+                    gameState.hoveredWall = wall;
+                    break;
+                }
+            }
+        }
+
+        function makeBounceWall(e) {
+            if (!gameState.bounceWallMode || !gameState.hoveredWall || gameState.currentPlayer !== myPlayerIndex) return;
+            const wall = gameState.hoveredWall;
+            if (!wall.bouncy) {
+                wall.bouncy = true;
+                wall.bouncyTurnsLeft = 3;
+                gameState.activePowerups.push({ type: "Bounce Wall", wall, turnsLeft: 3 });
+                gameState.bounceWallMode = false;
+                gameState.hoveredWall = null;
+                canvas.removeEventListener("mousemove", handleWallHover);
+                consumePowerup("Bounce Wall");
+                syncGameState();
+                updateMessageDisplay(`Your Turn`);
+            }
+        }
+
+        function consumePowerup(powerupName) {
+            const index = gameState.powerups.findIndex(p => p.name === powerupName);
+            if (index !== -1) {
+                gameState.powerups[index].currentCooldowns[myPlayerIndex] = gameState.powerups[index].cooldown;
+                updatePowerupButtons();
+            }
+        }
+
+        function initializePowerupButtons(isMyTurn) {
+            powerupContainer.innerHTML = "";
+            const selectedPowerupIndex = gameState.selectedPowerups[myPlayerIndex];
+            if (selectedPowerupIndex !== null && gameState.powerups[selectedPowerupIndex]) {
+                const powerup = gameState.powerups[selectedPowerupIndex];
+                const button = document.createElement("button");
+                button.className = "powerup-button";
+                button.disabled = !isMyTurn || powerup.currentCooldowns[myPlayerIndex] > 0; // Disable if not my turn
+                button.classList.toggle("disabled", !isMyTurn || powerup.currentCooldowns[myPlayerIndex] > 0);
+                button.innerHTML = `
+                    <div class="powerup-icon">${powerup.icon}</div>
+                    <div class="powerup-name">${powerup.name}</div>
+                    <div class="powerup-cooldown">${powerup.currentCooldowns[myPlayerIndex] > 0 ? `CD: ${powerup.currentCooldowns[myPlayerIndex]}` : 'Ready'}</div>
+                `;
+                if (isMyTurn) { // Only add listener if it's my turn
+                    button.addEventListener("click", () => {
+                        if (powerup.currentCooldowns[myPlayerIndex] === 0) {
+                            button.classList.toggle("active");
+                            if (button.classList.contains("active")) activatePowerup(powerup.name);
+                            else {
+                                gameState.wallPlacementMode = gameState.bounceWallMode = false;
+                                gameState.previewWall = gameState.hoveredWall = null;
+                                updateMessageDisplay("Your Turn");
+                            }
+                        }
+                    });
+                }
+                powerupContainer.appendChild(button);
+            }
+        }
+
+        function updatePowerupButtons() {
+            const button = powerupContainer.querySelector(".powerup-button");
+            if (button) {
+                const selectedPowerupIndex = gameState.selectedPowerups[myPlayerIndex];
+                const powerup = gameState.powerups[selectedPowerupIndex];
+                button.disabled = powerup.currentCooldowns[myPlayerIndex] > 0;
+                button.classList.toggle("disabled", powerup.currentCooldowns[myPlayerIndex] > 0);
+                button.classList.remove("active");
+                button.querySelector(".powerup-cooldown").textContent = powerup.currentCooldowns[myPlayerIndex] > 0 ? `CD: ${powerup.currentCooldowns[myPlayerIndex]}` : 'Ready';
+            }
+        }
+
+        function syncGameState() {
+            const wallsToSync = gameState.walls.map(w => ({
+                x: w.x,
+                y: w.y,
+                width: w.width,
+                height: w.height,
+                angle: w.angle || 0,           // Default to 0 if undefined
+                breakable: w.breakable || false, // Default to false
+                bouncy: w.bouncy || false,    // Default to false
+                temporary: w.temporary || false, // Default to false (fixes the error)
+                turnsLeft: w.turnsLeft || 0   // Default to 0
+            }));
+            gameRef.update({
+                balls: gameState.balls,
+                walls: wallsToSync,
+                powerups: gameState.powerups,
+                activePowerups: gameState.activePowerups,
+                currentPlayer: gameState.currentPlayer,
+                scores: gameState.scores,
+                hasShot: gameState.hasShot,
+                currentRound: gameState.currentRound,
+                displayNames: gameState.displayNames
+            });
+        }
+
+        function gameLoop() {
+            update();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            if (gameState.currentScreen !== "game" || isInitialLoad) return;
+            updateBalls();
+            checkRoundEnd();
+            const currentBall = gameState.balls[gameState.currentPlayer];
+            if (Math.abs(currentBall.vx) < 0.01 && Math.abs(currentBall.vy) < 0.01 && gameState.hasShot && gameState.currentPlayer === myPlayerIndex) {
+                if (!gameState.wallPlacementMode && !gameState.bounceWallMode) {
+                    nextTurn();      // Alternate turn after ball stops
+                    syncGameState();
+                    updateUI();      // Update UI immediately
+                }
+            }
+            updateUI(); // Ensure UI updates every frame
+        }
+
+        function updateBalls() {
+            gameState.balls.forEach(ball => {
+                ball.vx *= FRICTION;
+                ball.vy *= FRICTION;
+                if (Math.abs(ball.vx) < 0.01) ball.vx = 0;
+                if (Math.abs(ball.vy) < 0.01) ball.vy = 0;
+                ball.x += ball.vx;
+                ball.y += ball.vy;
+                checkWallCollisions(ball);
+                checkBallCollisions();
+            });
+        }
+
+        function checkWallCollisions(ball) {
+            if (ball.x < BALL_RADIUS) { ball.x = BALL_RADIUS; ball.vx = -ball.vx * 0.8; }
+            else if (ball.x > CANVAS_WIDTH - BALL_RADIUS) { ball.x = CANVAS_WIDTH - BALL_RADIUS; ball.vx = -ball.vx * 0.8; }
+            if (ball.y < BALL_RADIUS) { ball.y = BALL_RADIUS; ball.vy = -ball.vy * 0.8; }
+            else if (ball.y > CANVAS_HEIGHT - BALL_RADIUS) { ball.y = CANVAS_HEIGHT - BALL_RADIUS; ball.vy = -ball.vy * 0.8; }
+
+            gameState.walls.forEach((wall, i) => {
+                const closestX = Math.max(wall.x, Math.min(ball.x, wall.x + wall.width));
+                const closestY = Math.max(wall.y, Math.min(ball.y, wall.y + wall.height));
+                const distanceX = ball.x - closestX, distanceY = ball.y - closestY;
+                const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+                if (distance < BALL_RADIUS) {
+                    const normalX = distanceX / distance, normalY = distanceY / distance;
+                    ball.x = closestX + normalX * BALL_RADIUS;
+                    ball.y = closestY + normalY * BALL_RADIUS;
+                    const dotProduct = ball.vx * normalX + ball.vy * normalY;
+                    const bounceFactor = wall.bouncy ? 1.5 : 0.8;
+                    ball.vx = (ball.vx - 2 * dotProduct * normalX) * bounceFactor;
+                    ball.vy = (ball.vy - 2 * dotProduct * normalY) * bounceFactor;
+                }
+            });
+        }
+
+        function checkBallCollisions() {
+            const [ball1, ball2] = gameState.balls;
+            const dx = ball2.x - ball1.x, dy = ball2.y - ball1.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < BALL_RADIUS * 2) {
+                const nx = dx / distance, ny = dy / distance;
+                const vx = ball1.vx - ball2.vx, vy = ball1.vy - ball2.vy;
+                const impulse = 2 * (vx * nx + vy * ny) / 2;
+                ball1.vx -= impulse * nx; ball1.vy -= impulse * ny;
+                ball2.vx += impulse * nx; ball2.vy += impulse * ny;
+                const overlap = (BALL_RADIUS * 2) - distance;
+                ball1.x -= overlap * nx / 2; ball1.y -= overlap * ny / 2;
+                ball2.x += overlap * nx / 2; ball2.y += overlap * ny / 2;
+            }
+        }
+
+        function checkRoundEnd() {
+            gameState.balls.forEach((ball, i) => {
+                const targetHole = gameState.holes[i];
+                const dx = ball.x - targetHole.x, dy = ball.y - targetHole.y;
+                if (Math.sqrt(dx * dx + dy * dy) < HOLE_RADIUS && gameState.currentPlayer === myPlayerIndex) {
+                    gameState.scores[i]++;
+                    resetRound();
+                    syncGameState();
+                }
+            });
+        }
+
+        function resetRound() {
+            gameState.balls[0] = { x: CANVAS_WIDTH * 0.15, y: CANVAS_HEIGHT * 0.15, vx: 0, vy: 0, color: PLAYER_COLORS[0] };
+            gameState.balls[1] = { x: CANVAS_WIDTH * 0.85, y: CANVAS_HEIGHT * 0.85, vx: 0, vy: 0, color: PLAYER_COLORS[1] };
+            gameState.currentRound++;
+            gameState.hasShot = false;
+            gameState.currentPlayer = 0;
+            if (isHost) generateRandomObstacles();
+        }
+
+        function nextTurn() {
+            gameState.hasShot = false;
+            gameState.powerups.forEach(p => {
+                p.currentCooldowns[myPlayerIndex] = Math.max(0, p.currentCooldowns[myPlayerIndex] - 1); // Update only current player's cooldown
+            });
+            gameState.activePowerups.forEach((p, i) => {
+                p.turnsLeft--;
+                if (p.turnsLeft <= 0) {
+                    if (p.type === "Wall Placement") gameState.walls = gameState.walls.filter(w => w !== p.wall);
+                    else if (p.type === "Bounce Wall") p.wall.bouncy = false;
+                    gameState.activePowerups.splice(i, 1);
+                }
+            });
+            gameState.currentPlayer = 1 - gameState.currentPlayer; // Always alternate turns
+        }
+
+        function render() {
+            ctx.fillStyle = "#8CC067";
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            if (isInitialLoad) return;
+            renderHoles();
+            renderWalls();
+            if (gameState.wallPlacementMode && gameState.previewWall && gameState.currentPlayer === myPlayerIndex) renderPreviewWall();
+            renderBalls();
+            if (gameState.isAiming && gameState.currentPlayer === myPlayerIndex) renderAimingLine();
+        }
+
+        function renderHoles() {
+            if (!gameState.holes) return;
+            gameState.holes.forEach(hole => {
+                ctx.beginPath();
+                ctx.arc(hole.x, hole.y, HOLE_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = "#000000";
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(hole.x, hole.y, HOLE_RADIUS + 2, 0, Math.PI * 2);
+                ctx.strokeStyle = hole.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+        }
+
+        function renderWalls() {
+            if (!gameState.walls) return;
+            gameState.walls.forEach(wall => {
+                ctx.save();
+                const centerX = wall.x + wall.width / 2, centerY = wall.y + wall.height / 2;
+                ctx.translate(centerX, centerY);
+                ctx.rotate(wall.angle || 0);
+                ctx.fillStyle = wall.bouncy ? WALL_COLORS.BOUNCY : (wall.isHovered && gameState.bounceWallMode ? "rgba(0, 150, 255, 0.5)" : WALL_COLORS.NORMAL);
+                ctx.fillRect(-wall.width / 2, -wall.height / 2, wall.width, wall.height);
+                if (wall.temporary) {
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.font = "10px Arial";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(wall.turnsLeft, 0, 0);
+                }
+                ctx.restore();
+            });
+        }
+
+        function renderBalls() {
+            if (!gameState.balls) return;
+            gameState.balls.forEach(ball => {
+                ctx.beginPath();
+                ctx.arc(ball.x + 2, ball.y + 2, BALL_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, BALL_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = ball.color;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(ball.x - BALL_RADIUS, ball.y);
+                ctx.lineTo(ball.x + BALL_RADIUS, ball.y);
+                ctx.strokeStyle = "#FFFFFF";
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(ball.x, ball.y - BALL_RADIUS);
+                ctx.lineTo(ball.x, ball.y + BALL_RADIUS);
+                ctx.stroke();
+            });
+        }
+
+        function renderAimingLine() {
+            const currentBall = gameState.balls[myPlayerIndex];
+            const angle = gameState.swingAngle, power = gameState.swingPower;
+            ctx.beginPath();
+            ctx.moveTo(currentBall.x, currentBall.y);
+            const aimX = currentBall.x - Math.cos(angle) * power * 5, aimY = currentBall.y - Math.sin(angle) * power * 5;
+            ctx.lineTo(aimX, aimY);
+            ctx.strokeStyle = "#FFFFFF";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(aimX, aimY, 4, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fill();
+        }
+
+        function renderPreviewWall() {
+            ctx.save();
+            const centerX = gameState.previewWall.x + gameState.previewWall.width / 2, centerY = gameState.previewWall.y + gameState.previewWall.height / 2;
+            ctx.translate(centerX, centerY);
+            ctx.rotate(gameState.previewWall.angle);
+            ctx.fillStyle = `rgba(85, 85, 85, ${gameState.previewWall.alpha})`;
+            ctx.fillRect(-gameState.previewWall.width / 2, -gameState.previewWall.height / 2, gameState.previewWall.width, gameState.previewWall.height);
+            ctx.restore();
+        }
+
+        function calculateWallVertices(x, y, width, height, angle) {
+            const halfWidth = width / 2, halfHeight = height / 2, centerX = x + halfWidth, centerY = y + halfHeight;
+            const vertices = [
+                { x: -halfWidth, y: -halfHeight }, { x: halfWidth, y: -halfHeight },
+                { x: halfWidth, y: halfHeight }, { x: -halfWidth, y: halfHeight }
+            ];
+            return vertices.map(v => {
+                const rotatedX = v.x * Math.cos(angle) - v.y * Math.sin(angle);
+                const rotatedY = v.x * Math.sin(angle) + v.y * Math.cos(angle);
+                return { x: rotatedX + centerX, y: rotatedY + centerY };
+            });
+        }
+
+        function isBallMoving() {
+            return gameState.balls.some(b => Math.abs(b.vx) > 0.01 || Math.abs(b.vy) > 0.01);
+        }
+
+        function updatePowerBar() {
+            const percentage = (gameState.swingPower / MAX_POWER) * 100;
+            powerBar.style.width = `${percentage}%`;
+            powerBar.style.backgroundColor = percentage < 30 ? "#00FF00" : percentage < 70 ? "#FFFF00" : "#FF0000";
+        }
+
+        function updateAngleIndicator() {
+            const angle = gameState.swingAngle * (180 / Math.PI);
+            angleIndicator.textContent = `Angle: ${angle.toFixed(1)}°`;
+        }
+
+        function updateMessageDisplay(message) {
+            const playerColor = PLAYER_COLORS[gameState.currentPlayer];
+            messageDisplay.innerHTML = `<span>${message}</span><span class="player-indicator" style="background-color: ${playerColor}"></span>`;
+        }
+
+        window.onload = init;
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'92c3a1adbd08da47',t:'MTc0Mzk2NzExMS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
